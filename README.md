@@ -42,6 +42,16 @@ The hosted demo currently provides access to the **Admin** and **Lender** web in
 
 ![Smart Credit+ Lender Web App](docs/screenshots/lender-dashboard.png)
 
+### lender mobile part
+
+<p>
+  <img src="docs/screenshots/lender-mobile-find-loans.jpeg" alt="Find Loans screen" width="240" />
+  <img src="docs/screenshots/lender-mobile-home.jpeg" alt="Mobile home dashboard" width="240" />
+  <img src="docs/screenshots/lender-mobile-applications.jpeg" alt="My Applications screen" width="240" />
+  <img src="docs/screenshots/lender-mobile-nearby-lenders.jpeg" alt="Nearby Lenders map" width="240" />
+  <img src="docs/screenshots/lender-mobile-payments.jpeg" alt="Payments screen" width="240" />
+</p>
+
 ---
 
 ## Project Overview
