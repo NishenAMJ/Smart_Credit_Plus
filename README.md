@@ -1,6 +1,6 @@
 # Smart Credit+
 
-**Smart Credit+** is an intelligent peer-to-peer lending platform designed to connect borrowers and lenders securely while simplifying loan requests, agreements, repayments, credit evaluation, and platform administration.
+**Smart Credit+** is a peer-to-peer lending platform designed to connect borrowers and lenders securely while simplifying loan requests, agreements, repayments, credit evaluation, and platform administration.
 
 The system consists of:
 
@@ -108,7 +108,7 @@ The platform uses role-based access for **Borrowers**, **Lenders**, and **Admini
 
 | Layer | Technology |
 | --- | --- |
-| Borrower Mobile App | React Native, Expo |
+| Borrower/Lender Mobile App | React Native, Expo |
 | Web Applications | React, TypeScript, Vite |
 | Backend API | NestJS, TypeScript |
 | Database / Backend Services | Firebase |
