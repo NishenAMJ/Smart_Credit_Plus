@@ -3,7 +3,7 @@ import { RepaymentMethod } from '../applications/dto/loan-application.dto';
 import { BorrowerService } from '../core/borrower.service';
 import { createHash } from 'crypto';
 import { PayHereService } from '../../../common/payhere/payhere.service';
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 type BorrowerPaymentsServiceMock = jest.Mocked<
   Pick<BorrowerService, 'makeRepayment' | 'generateQrToken' | 'verifyQrToken'>
@@ -59,6 +59,20 @@ describe('BorrowerPaymentsService', () => {
       expect.objectContaining({ receiptDocumentId: 'receipt-1' }),
     );
   });
+
+  it.each([undefined, 'not-a-number', Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects a non-finite repayment amount: %p',
+    (amount) => {
+      expect(() =>
+        service.makePayment({
+          loanId: 'loan-1',
+          borrowerId: 'borrower-1',
+          amount,
+        }),
+      ).toThrow(BadRequestException);
+      expect(borrowerService.makeRepayment).not.toHaveBeenCalled();
+    },
+  );
 
   it('marks the payable installment for retry after a receipt rejection', async () => {
     const borrowerPayments = {
@@ -126,6 +140,51 @@ describe('BorrowerPaymentsService', () => {
         expect.objectContaining({
           repaymentId: 'repayment-1',
           status: 'rejected',
+        }),
+      ]),
+    );
+  });
+
+  it('converts canonical transaction minor units for borrower recent activity', async () => {
+    const borrowerPayments = {
+      getLoans: jest.fn().mockResolvedValue([
+        {
+          loanId: 'loan-1',
+          lenderId: 'lender-1',
+          lenderName: 'Example Lender',
+          principalAmount: 10000,
+        },
+      ]),
+      getLenderNamesMap: jest
+        .fn()
+        .mockResolvedValue(new Map([['lender-1', 'Example Lender']])),
+      getRepaymentHistory: jest.fn().mockResolvedValue([]),
+      getBorrowerRepaymentTransactions: jest.fn().mockResolvedValue([
+        {
+          transactionId: 'transaction-1',
+          loanId: 'loan-1',
+          type: 'repayment',
+          status: 'completed',
+          amountMinor: 425050,
+          paidAt: new Date('2026-08-23T00:00:00.000Z'),
+        },
+      ]),
+    };
+    const transactionService = new BorrowerPaymentsService(
+      borrowerPayments as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await transactionService.getTransactions('borrower-1');
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          transactionId: 'transaction-1',
+          status: 'completed',
+          amount: 4250.5,
         }),
       ]),
     );

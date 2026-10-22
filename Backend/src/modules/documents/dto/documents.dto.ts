@@ -2,22 +2,42 @@ import type { DocumentCategory } from '../interfaces/document-record.interface';
 import {
   IsIn,
   IsInt,
-  IsMimeType,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUrl,
-  Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 
+const DOCUMENT_CATEGORIES = [
+  'kyc',
+  'agreement',
+  'dispute_evidence',
+  'payment_receipt',
+] as const;
+const DOCUMENT_ENTITY_TYPES = [
+  'user',
+  'loan',
+  'ad_boost',
+  'legal_document',
+  'loan_agreement',
+  'dispute',
+] as const;
+const DOCUMENT_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+] as const;
+
 // ─── Upload Init ─────────────────────────────────────────────────────────────
 
 export class InitUploadDto {
   /** One of: 'kyc' | 'agreement' */
-  @IsIn(['kyc', 'agreement', 'dispute_evidence', 'payment_receipt'])
+  @IsIn(DOCUMENT_CATEGORIES)
   category!: DocumentCategory;
   /** Fine-grained type, e.g. 'nic_front', 'bank_document', 'loan_agreement_pdf'. */
   @IsString()
@@ -27,11 +47,10 @@ export class InitUploadDto {
   /** Original filename provided by the client (used to derive the Cloudinary publicId). */
   @IsString()
   @IsNotEmpty()
-  @MaxLength(255)
+  @MaxLength(120)
   fileName!: string;
   /** MIME type the client intends to upload, e.g. 'image/jpeg' or 'application/pdf'. */
-  @IsMimeType()
-  @IsIn(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+  @IsIn(DOCUMENT_MIME_TYPES)
   contentType!: string;
   /** Size checked before issuing upload credentials. */
   @IsInt()
@@ -41,18 +60,12 @@ export class InitUploadDto {
   /** Optional: Firestore ID of the related entity (e.g. a loan or legal document). */
   @IsOptional()
   @IsString()
-  @MaxLength(160)
+  @IsNotEmpty()
+  @MaxLength(200)
   relatedEntityId?: string;
   /** Optional: type of the related entity ('user' | 'loan' | 'legal_document'). */
   @IsOptional()
-  @IsIn([
-    'user',
-    'loan',
-    'ad_boost',
-    'legal_document',
-    'loan_agreement',
-    'dispute',
-  ])
+  @IsIn(DOCUMENT_ENTITY_TYPES)
   relatedEntityType?: string;
 }
 
@@ -83,7 +96,7 @@ export class CompleteUploadDto {
   /** Cloudinary asset_id returned in the upload response. */
   @IsString()
   @IsNotEmpty()
-  @MaxLength(160)
+  @MaxLength(200)
   assetId!: string;
   /** Cloudinary resource_type ('image' | 'raw'). */
   @IsIn(['image', 'raw'])
@@ -92,7 +105,7 @@ export class CompleteUploadDto {
   @IsIn(['upload', 'authenticated'])
   deliveryType!: string;
   /** File size in bytes. */
-  @IsInt()
+  @IsNumber({ allowInfinity: false, allowNaN: false })
   @Min(1)
   @Max(10 * 1024 * 1024)
   bytes!: number;
@@ -101,8 +114,8 @@ export class CompleteUploadDto {
   @Min(1)
   version!: number;
   /** Cloudinary secure_url from the upload response. */
-  @IsUrl({ require_protocol: true })
-  @MaxLength(2000)
+  @IsUrl({ protocols: ['https'], require_protocol: true })
+  @MaxLength(1000)
   secureUrl!: string;
   /** Optional format string (e.g. 'jpg', 'pdf'). */
   @IsOptional()
@@ -110,19 +123,20 @@ export class CompleteUploadDto {
   @MaxLength(20)
   format?: string;
   /** SHA-256 hash of the file computed client-side (hex string). */
-  @Matches(/^[a-f0-9]{64}$/i)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
   fileHash!: string;
   /** Original filename. */
   @IsString()
   @IsNotEmpty()
-  @MaxLength(255)
+  @MaxLength(120)
   originalFilename!: string;
   /** MIME type of the uploaded file. */
-  @IsMimeType()
-  @IsIn(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+  @IsIn(DOCUMENT_MIME_TYPES)
   mimeType!: string;
   /** One of: 'kyc' | 'agreement' */
-  @IsIn(['kyc', 'agreement', 'dispute_evidence', 'payment_receipt'])
+  @IsIn(DOCUMENT_CATEGORIES)
   category!: DocumentCategory;
   /** Fine-grained document type. */
   @IsString()
@@ -132,23 +146,17 @@ export class CompleteUploadDto {
   /** Optional: Firestore ID of the related entity. */
   @IsOptional()
   @IsString()
-  @MaxLength(160)
+  @IsNotEmpty()
+  @MaxLength(200)
   relatedEntityId?: string;
   /** Optional: type of the related entity. */
   @IsOptional()
-  @IsIn([
-    'user',
-    'loan',
-    'ad_boost',
-    'legal_document',
-    'loan_agreement',
-    'dispute',
-  ])
+  @IsIn(DOCUMENT_ENTITY_TYPES)
   relatedEntityType?: string;
   /** Optional: human-readable display label. */
   @IsOptional()
   @IsString()
-  @MaxLength(255)
+  @MaxLength(120)
   displayName?: string;
 }
 

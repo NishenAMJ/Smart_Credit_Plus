@@ -4,8 +4,8 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsNotEmpty,
   MaxLength,
-  MinLength,
   Matches,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -18,7 +18,7 @@ export class SubmitKycDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(3)
+  @IsNotEmpty()
   @MaxLength(120)
   fullName?: string;
 
@@ -29,27 +29,23 @@ export class SubmitKycDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(20)
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.replace(/[\s()-]/g, '') : value,
-  )
-  @Matches(/^(?:\+94|94|0)?7[01245678]\d{7}$/, {
-    message: 'Please provide a valid Sri Lankan mobile number.',
-  })
+  @Matches(/^\+?[0-9()\-\s]{9,20}$/)
   phoneNumber?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(20)
   nic?: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(80)
+  @IsIn(['national_id', 'passport', 'driving_license'])
   documentType?: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(80)
+  @IsNotEmpty()
+  @MaxLength(30)
   documentNumber?: string;
 
   @IsOptional()
@@ -62,7 +58,7 @@ export class SubmitKycDto {
   expiryDate?: string;
 
   @IsOptional()
-  @IsString()
+  @IsDateString()
   birthDate?: string;
 
   // Accepted only for backwards-compatible validation. Authentication owns

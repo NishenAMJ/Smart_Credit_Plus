@@ -269,6 +269,7 @@ export class MediaService {
         resourceType,
         deliveryType,
         secureUrl: `https://mock-cloudinary.test/${encodeURIComponent(publicId)}`,
+        contentHash: createHash('sha256').update(publicId).digest('hex'),
         uploadedAt: new Date().toISOString(),
       };
     }
@@ -318,7 +319,26 @@ export class MediaService {
       };
     }
 
-    return null;
+    return {
+      assetId: String(payload.asset_id ?? ''),
+      publicId: String(payload.public_id ?? publicId),
+      version: Number(payload.version ?? 0),
+      format: typeof payload.format === 'string' ? payload.format : undefined,
+      bytes: Number(payload.bytes ?? 0),
+      resourceType: String(payload.resource_type ?? resourceType),
+      deliveryType: String(payload.type ?? deliveryType),
+      secureUrl: String(payload.secure_url ?? ''),
+      originalFilename:
+        typeof payload.original_filename === 'string'
+          ? payload.original_filename
+          : undefined,
+      folder: typeof payload.folder === 'string' ? payload.folder : undefined,
+      contentHash:
+        typeof payload.etag === 'string' && payload.etag.trim()
+          ? payload.etag.trim().toLowerCase()
+          : undefined,
+      uploadedAt: new Date().toISOString(),
+    };
   }
 
   /**
