@@ -15,6 +15,7 @@ import {
   type LoanLedgerDetailsResponse,
   type LoanLedgerInstallmentDetail,
 } from "../../lib/recent-transactions-api";
+import { dateError, focusFirstInvalidField } from "../../../lib/validation";
 
 type LoanDetailsModalProps = {
   lenderId: string;
@@ -101,6 +102,16 @@ function getOutstanding(installment: LoanLedgerInstallmentDetail): number {
   return Math.max(0, installment.amount - installment.paidAmount);
 }
 
+function isSettledInstallment(
+  installment: LoanLedgerInstallmentDetail,
+): boolean {
+  return (
+    installment.status === "paid" ||
+    installment.status === "waived" ||
+    getOutstanding(installment) <= 0
+  );
+}
+
 export default function LoanDetailsModal({
   lenderId,
   loanId,
@@ -184,7 +195,7 @@ export default function LoanDetailsModal({
   );
 
   const nextUnpaidInstallment = details?.installments.find(
-    (installment) => getOutstanding(installment) > 0,
+    (installment) => !isSettledInstallment(installment),
   );
   const expandedInstallmentIndex =
     details?.installments.findIndex(
@@ -196,6 +207,14 @@ export default function LoanDetailsModal({
       : null;
 
   function openPaymentForm(installment: LoanLedgerInstallmentDetail) {
+    if (installment.id !== nextUnpaidInstallment?.id) {
+      setPaymentForm((current) => ({
+        ...current,
+        error:
+          "Record the earliest unpaid installment before continuing to later installments.",
+      }));
+      return;
+    }
     setShowPayments(true);
     setExpandedInstallmentId(installment.id);
     setPaymentForm({
@@ -217,6 +236,26 @@ export default function LoanDetailsModal({
         ...current,
         error: "The installment does not have a valid outstanding amount.",
       }));
+      return;
+    }
+    const activationDate = details?.loan.createdAt?.slice(0, 10) ?? null;
+    const paidAtError = dateError(paymentForm.paidAt, "Payment date", {
+      notFuture: true,
+      min: activationDate,
+    });
+    if (paidAtError) {
+      setPaymentForm((current) => ({ ...current, error: paidAtError }));
+      focusFirstInvalidField({ paidAt: paidAtError });
+      return;
+    }
+    if (paymentForm.note.trim().length > 500) {
+      setPaymentForm((current) => ({
+        ...current,
+        error: "Payment note cannot exceed 500 characters.",
+      }));
+      focusFirstInvalidField({
+        note: "Payment note cannot exceed 500 characters.",
+      });
       return;
     }
 
@@ -461,9 +500,7 @@ export default function LoanDetailsModal({
                             <div>
                               <span>Paid</span>
                               <strong>
-                                {formatCurrency(
-                                  expandedInstallment.paidAmount,
-                                )}
+                                {formatCurrency(expandedInstallment.paidAmount)}
                               </strong>
                             </div>
                             <div>
@@ -478,15 +515,22 @@ export default function LoanDetailsModal({
                               className="button button-secondary"
                               type="button"
                               disabled={
-                                getOutstanding(expandedInstallment) <= 0
+                                isSettledInstallment(expandedInstallment) ||
+                                expandedInstallment.id !==
+                                  nextUnpaidInstallment?.id
                               }
                               onClick={() =>
                                 openPaymentForm(expandedInstallment)
                               }
                             >
-                              {getOutstanding(expandedInstallment) > 0
-                                ? "Record payment"
-                                : "Paid"}
+                              {isSettledInstallment(expandedInstallment)
+                                ? expandedInstallment.status === "waived"
+                                  ? "Waived"
+                                  : "Paid"
+                                : expandedInstallment.id ===
+                                    nextUnpaidInstallment?.id
+                                  ? "Record payment"
+                                  : "Previous payment required"}
                             </button>
                           </div>
 
@@ -524,6 +568,12 @@ export default function LoanDetailsModal({
                                   <input
                                     className="input"
                                     type="date"
+                                    data-validation-field="paidAt"
+                                    max={getLocalDateValue()}
+                                    min={
+                                      details?.loan.createdAt?.slice(0, 10) ??
+                                      undefined
+                                    }
                                     value={paymentForm.paidAt}
                                     onChange={(event) =>
                                       setPaymentForm((current) => ({
@@ -567,6 +617,8 @@ export default function LoanDetailsModal({
                                   </span>
                                   <textarea
                                     className="create-ad-textarea"
+                                    data-validation-field="note"
+                                    maxLength={500}
                                     rows={3}
                                     placeholder="Optional payment note"
                                     value={paymentForm.note}

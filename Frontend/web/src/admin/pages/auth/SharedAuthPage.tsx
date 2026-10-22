@@ -17,6 +17,14 @@ import {
   setLenderSession,
   type SharedAuthUser,
 } from "../../lib/auth";
+import {
+  dateError,
+  fileError,
+  focusFirstInvalidField,
+  getApiFieldErrors,
+  normalizePhone,
+  requiredText,
+} from "../../../lib/validation";
 import "./shared-auth.css";
 
 type AuthMode = "login" | "register";
@@ -46,6 +54,52 @@ const ROLE_DETAILS: Record<
 };
 
 const STORAGE_KEY = "smart-credit-shared-auth-session";
+
+// Accepts Sri Lankan mobile numbers in local and international formats.
+const SRI_LANKAN_MOBILE_PATTERN = /^(?:\+94|94|0)?7[01245678]\d{7}$/;
+
+function compactPhoneNumber(value: string) {
+  return value.replace(/[\s()-]/g, "");
+}
+
+function getEmailValidationError(value: string) {
+  const email = value.trim();
+
+  if (!email) return "Email is required.";
+  if (email.length > 254) return "Email address is too long.";
+
+  const parts = email.split("@");
+  if (parts.length !== 2) return "Enter a valid email address.";
+
+  const [localPart, domain] = parts;
+  if (
+    !localPart ||
+    localPart.length > 64 ||
+    localPart.startsWith(".") ||
+    localPart.endsWith(".") ||
+    localPart.includes("..") ||
+    !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(localPart)
+  ) {
+    return "Enter a valid email address.";
+  }
+
+  const domainLabels = domain.split(".");
+  if (
+    domain.length > 253 ||
+    domainLabels.length < 2 ||
+    domainLabels.some(
+      (label) =>
+        !label ||
+        label.length > 63 ||
+        !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label),
+    ) ||
+    !/^[A-Za-z]{2,63}$/.test(domainLabels.at(-1) ?? "")
+  ) {
+    return "Enter a valid email address.";
+  }
+
+  return "";
+}
 
 const initialKycForm: SubmitKycPayload = {
   documentType: "national_id",
@@ -217,7 +271,7 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
     setInfoMessage(successCopy);
   }
 
-  function validateLogin() {
+  function getLoginErrors() {
     const nextErrors: Record<string, string> = {};
 
     if (!loginIdentifier.trim()) {
@@ -228,39 +282,35 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
       nextErrors.password = "Password is required.";
     }
 
-    setFieldErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    return nextErrors;
   }
 
-  function validateRegisterAccount() {
+  function getRegisterAccountErrors() {
     const nextErrors: Record<string, string> = {};
 
-    if (!registerForm.fullName.trim()) {
-      nextErrors.fullName = "Full name is required.";
-    }
-
-    if (!registerForm.email.trim()) {
-      nextErrors.email = "Email is required.";
-    } else if (!/^\S+@\S+\.\S+$/.test(registerForm.email.trim())) {
-      nextErrors.email = "Enter a valid email address.";
-    }
-
-    if (!registerForm.phone.trim()) {
-      nextErrors.phone = "Phone is required.";
-    }
-
-    if (!registerForm.address.line1.trim()) {
-      nextErrors.addressLine1 = "Street address is required.";
-    }
-    if (!registerForm.address.city.trim()) {
-      nextErrors.city = "City is required.";
-    }
-    if (!registerForm.address.district.trim()) {
-      nextErrors.district = "District is required.";
-    }
-    if (!registerForm.address.province.trim()) {
-      nextErrors.province = "Province is required.";
-    }
+    nextErrors.fullName =
+      requiredText(registerForm.fullName, "Full name", { min: 3, max: 120 }) ??
+      "";
+    nextErrors.email = getEmailValidationError(registerForm.email);
+    nextErrors.phone = !registerForm.phone.trim()
+      ? "Phone is required."
+      : SRI_LANKAN_MOBILE_PATTERN.test(
+            compactPhoneNumber(registerForm.phone.trim()),
+          )
+        ? ""
+        : "Enter a valid Sri Lankan mobile number (for example, 0771234567).";
+    nextErrors.addressLine1 =
+      requiredText(registerForm.address.line1, "Street address", {
+        max: 160,
+      }) ?? "";
+    nextErrors.city =
+      requiredText(registerForm.address.city, "City", { max: 80 }) ?? "";
+    nextErrors.district =
+      requiredText(registerForm.address.district, "District", { max: 80 }) ??
+      "";
+    nextErrors.province =
+      requiredText(registerForm.address.province, "Province", { max: 80 }) ??
+      "";
 
     if (!registerForm.password.trim()) {
       nextErrors.password = "Password is required.";
@@ -274,19 +324,38 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
       nextErrors.confirmPassword = "Passwords do not match.";
     }
 
-    setFieldErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    return Object.fromEntries(
+      Object.entries(nextErrors).filter(([, message]) => message),
+    );
   }
 
-  function validateKycDetails() {
+  function getKycErrors() {
     const nextErrors: Record<string, string> = {};
 
-    if (!registerForm.kyc.fullName.trim()) {
-      nextErrors.kycFullName = "Full name on the ID is required.";
+    nextErrors.kycFullName =
+      requiredText(registerForm.kyc.fullName, "Full name on the ID", {
+        min: 3,
+        max: 120,
+      }) ?? "";
+    nextErrors.documentNumber =
+      requiredText(registerForm.kyc.documentNumber, "Document number", {
+        max: 80,
+      }) ?? "";
+    if (
+      !["national_id", "passport", "driving_license"].includes(
+        registerForm.kyc.documentType,
+      )
+    ) {
+      nextErrors.documentType = "Select a supported document type.";
     }
-
-    if (!registerForm.kyc.documentNumber.trim()) {
-      nextErrors.documentNumber = "Document number is required.";
+    if (registerForm.kyc.expiryDate) {
+      const expiryError = dateError(registerForm.kyc.expiryDate, "Expiry date");
+      if (expiryError) nextErrors.expiryDate = expiryError;
+      else if (
+        registerForm.kyc.expiryDate < new Date().toISOString().slice(0, 10)
+      ) {
+        nextErrors.expiryDate = "The identity document has expired.";
+      }
     }
 
     if (!registerForm.kyc.documentFrontUrl?.trim()) {
@@ -301,8 +370,42 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
       nextErrors.selfieUrl = "Upload the selfie with your ID.";
     }
 
+    return Object.fromEntries(
+      Object.entries(nextErrors).filter(([, message]) => message),
+    );
+  }
+
+  function applyErrors(nextErrors: Record<string, string>) {
     setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length) focusFirstInvalidField(nextErrors);
     return Object.keys(nextErrors).length === 0;
+  }
+
+  function validateLogin() {
+    return applyErrors(getLoginErrors());
+  }
+
+  function validateRegisterAccount() {
+    return applyErrors(getRegisterAccountErrors());
+  }
+
+  function validateKycDetails() {
+    return applyErrors(getKycErrors());
+  }
+
+  function validateBlurredField(field: string) {
+    const errors =
+      mode === "login"
+        ? getLoginErrors()
+        : registerStep === "account"
+          ? getRegisterAccountErrors()
+          : getKycErrors();
+    setFieldErrors((current) => {
+      const next = { ...current };
+      if (errors[field]) next[field] = errors[field];
+      else delete next[field];
+      return next;
+    });
   }
 
   function handleContinueToKyc() {
@@ -355,10 +458,10 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
 
     try {
       setLoading(true);
-      const response = await loginWithRole(
-        loginIdentifier.trim(),
-        loginPassword,
-      );
+      const normalizedIdentifier = loginIdentifier.includes("@")
+        ? loginIdentifier.trim().toLowerCase()
+        : normalizePhone(loginIdentifier);
+      const response = await loginWithRole(normalizedIdentifier, loginPassword);
 
       const availableRoles = Array.from(
         new Set(
@@ -397,8 +500,11 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
 
     try {
       setLoading(true);
+      const normalizedIdentifier = loginIdentifier.includes("@")
+        ? loginIdentifier.trim().toLowerCase()
+        : normalizePhone(loginIdentifier);
       const response = await loginWithRole(
-        loginIdentifier.trim(),
+        normalizedIdentifier,
         loginPassword,
         role,
       );
@@ -446,8 +552,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
       try {
         await registerPublicUser({
           fullName: registerForm.fullName.trim(),
-          email: registerForm.email.trim(),
-          phone: registerForm.phone.trim(),
+          email: registerForm.email.trim().toLowerCase(),
+          phone: normalizePhone(registerForm.phone),
           address: {
             line1: registerForm.address.line1.trim(),
             ...(registerForm.address.line2.trim()
@@ -539,6 +645,20 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
         `Account created and KYC submitted successfully. Your ${registerRoleLabel} account is now waiting for review.`,
       );
     } catch (error) {
+      const backendErrors = getApiFieldErrors(error);
+      if (Object.keys(backendErrors).length) {
+        const aliases: Record<string, string> = {
+          "address.line1": "addressLine1",
+          "kyc.fullName": "kycFullName",
+        };
+        const mapped = Object.fromEntries(
+          Object.entries(backendErrors)
+            .filter((entry): entry is [string, string] => Boolean(entry[1]))
+            .map(([field, message]) => [aliases[field] ?? field, message]),
+        ) as Record<string, string>;
+        setFieldErrors((current) => ({ ...current, ...mapped }));
+        focusFirstInvalidField(mapped);
+      }
       setApiError(
         error instanceof Error
           ? error.message
@@ -559,6 +679,20 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
       return;
     }
 
+    const validationMessage = fileError(
+      file,
+      field === "selfieUrl" ? "Selfie" : "Identity document",
+      {
+        required: true,
+        imageOnly: field === "selfieUrl",
+      },
+    );
+    if (validationMessage) {
+      setFieldErrors((current) => ({ ...current, [field]: validationMessage }));
+      event.target.value = "";
+      return;
+    }
+
     try {
       const dataUrl = await toDataUrl(file);
       setRegisterForm((current) => ({
@@ -572,6 +706,11 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
         ...current,
         [field]: file.name,
       }));
+      setFieldErrors((current) => {
+        const next = { ...current };
+        delete next[field];
+        return next;
+      });
     } catch (error) {
       setApiError(
         error instanceof Error ? error.message : "File upload failed.",
@@ -708,11 +847,24 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
               <form
                 className="shared-auth-card shared-auth-form"
                 onSubmit={handleLogin}
+                noValidate
+                onBlurCapture={(event) => {
+                  const field = (event.target as HTMLElement).dataset
+                    .validationField;
+                  if (field) validateBlurredField(field);
+                }}
               >
+                {Object.keys(fieldErrors).length ? (
+                  <div className="shared-auth-alert error" role="alert">
+                    Check the highlighted fields and try again.
+                  </div>
+                ) : null}
                 <div className="shared-auth-field-card shared-auth-field-card-soft">
                   <label className="shared-auth-field">
                     <span>Email or phone</span>
                     <input
+                      data-validation-field="identifier"
+                      aria-invalid={Boolean(fieldErrors.identifier)}
                       value={loginIdentifier}
                       onChange={(event) =>
                         setLoginIdentifier(event.target.value)
@@ -731,6 +883,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                     <span>Password</span>
                     <div className="shared-auth-password-control">
                       <input
+                        data-validation-field="password"
+                        aria-invalid={Boolean(fieldErrors.password)}
                         type={showLoginPassword ? "text" : "password"}
                         value={loginPassword}
                         onChange={(event) =>
@@ -773,7 +927,19 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
               <form
                 className="shared-auth-card shared-auth-form"
                 onSubmit={handleRegister}
+                noValidate
+                onBlurCapture={(event) => {
+                  const field = (event.target as HTMLElement).dataset
+                    .validationField;
+                  if (field) validateBlurredField(field);
+                }}
               >
+                {Object.keys(fieldErrors).length ? (
+                  <div className="shared-auth-alert error" role="alert">
+                    Check the highlighted fields. Your entered information has
+                    been kept.
+                  </div>
+                ) : null}
                 <div className="shared-auth-onboarding-strip">
                   <div
                     className={`shared-auth-onboarding-step ${registerStep === "account" ? "active" : "complete"}`}
@@ -810,6 +976,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                         <label className="shared-auth-field">
                           <span>Full name</span>
                           <input
+                            data-validation-field="fullName"
+                            aria-invalid={Boolean(fieldErrors.fullName)}
                             value={registerForm.fullName}
                             onChange={(event) =>
                               setRegisterForm((current) => ({
@@ -835,6 +1003,11 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                         <label className="shared-auth-field">
                           <span>Phone</span>
                           <input
+                            data-validation-field="phone"
+                            aria-invalid={Boolean(fieldErrors.phone)}
+                            type="tel"
+                            inputMode="tel"
+                            autoComplete="tel"
                             value={registerForm.phone}
                             onChange={(event) =>
                               setRegisterForm((current) => ({
@@ -843,6 +1016,7 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                               }))
                             }
                             placeholder="+94 77 123 4567"
+                            maxLength={16}
                             disabled={loading}
                           />
                           {fieldErrors.phone ? (
@@ -856,6 +1030,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                       <label className="shared-auth-field">
                         <span>Email</span>
                         <input
+                          data-validation-field="email"
+                          aria-invalid={Boolean(fieldErrors.email)}
                           type="email"
                           value={registerForm.email}
                           onChange={(event) =>
@@ -864,6 +1040,20 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                               email: event.target.value,
                             }))
                           }
+                          onBlur={() => {
+                            const emailError = getEmailValidationError(
+                              registerForm.email,
+                            );
+                            setFieldErrors((current) => {
+                              if (emailError) {
+                                return { ...current, email: emailError };
+                              }
+
+                              const { email: _email, ...remainingErrors } =
+                                current;
+                              return remainingErrors;
+                            });
+                          }}
                           placeholder={`${registerRoleLabel}@example.com`}
                           disabled={loading}
                         />
@@ -885,6 +1075,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                       <label className="shared-auth-field">
                         <span>Street address</span>
                         <input
+                          data-validation-field="addressLine1"
+                          aria-invalid={Boolean(fieldErrors.addressLine1)}
                           autoComplete="address-line1"
                           value={registerForm.address.line1}
                           onChange={(event) =>
@@ -936,6 +1128,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                           <label className="shared-auth-field" key={key}>
                             <span>{label}</span>
                             <input
+                              data-validation-field={key}
+                              aria-invalid={Boolean(fieldErrors[key])}
                               autoComplete={
                                 key === "city"
                                   ? "address-level2"
@@ -994,6 +1188,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                           <span>Password</span>
                           <div className="shared-auth-password-control">
                             <input
+                              data-validation-field="password"
+                              aria-invalid={Boolean(fieldErrors.password)}
                               type={showRegisterPasswords ? "text" : "password"}
                               value={registerForm.password}
                               onChange={(event) =>
@@ -1031,6 +1227,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                         <label className="shared-auth-field">
                           <span>Confirm password</span>
                           <input
+                            data-validation-field="confirmPassword"
+                            aria-invalid={Boolean(fieldErrors.confirmPassword)}
                             type={showRegisterPasswords ? "text" : "password"}
                             value={registerForm.confirmPassword}
                             onChange={(event) =>
@@ -1083,6 +1281,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                       <label className="shared-auth-field">
                         <span>Full name on ID</span>
                         <input
+                          data-validation-field="kycFullName"
+                          aria-invalid={Boolean(fieldErrors.kycFullName)}
                           value={registerForm.kyc.fullName}
                           onChange={(event) =>
                             setRegisterForm((current) => ({
@@ -1107,6 +1307,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                         <label className="shared-auth-field">
                           <span>Document type</span>
                           <select
+                            data-validation-field="documentType"
+                            aria-invalid={Boolean(fieldErrors.documentType)}
                             value={registerForm.kyc.documentType}
                             onChange={(event) =>
                               setRegisterForm((current) => ({
@@ -1125,6 +1327,11 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                               Driving License
                             </option>
                           </select>
+                          {fieldErrors.documentType ? (
+                            <small className="shared-auth-error-text">
+                              {fieldErrors.documentType}
+                            </small>
+                          ) : null}
                         </label>
 
                         <label className="shared-auth-field">
@@ -1134,6 +1341,8 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                             )}
                           </span>
                           <input
+                            data-validation-field="documentNumber"
+                            aria-invalid={Boolean(fieldErrors.documentNumber)}
                             value={registerForm.kyc.documentNumber}
                             onChange={(event) =>
                               setRegisterForm((current) => ({
@@ -1172,12 +1381,19 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                             placeholder="Sri Lanka"
                             disabled={loading}
                           />
+                          {fieldErrors.expiryDate ? (
+                            <small className="shared-auth-error-text">
+                              {fieldErrors.expiryDate}
+                            </small>
+                          ) : null}
                         </label>
 
                         <label className="shared-auth-field">
                           <span>Expiry date</span>
                           <input
                             type="date"
+                            data-validation-field="expiryDate"
+                            aria-invalid={Boolean(fieldErrors.expiryDate)}
                             value={registerForm.kyc.expiryDate ?? ""}
                             onChange={(event) =>
                               setRegisterForm((current) => ({
@@ -1208,7 +1424,9 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                           <span>ID front</span>
                           <input
                             type="file"
-                            accept="image/*,.pdf"
+                            accept="image/jpeg,image/png,image/webp,application/pdf"
+                            data-validation-field="documentFrontUrl"
+                            aria-invalid={Boolean(fieldErrors.documentFrontUrl)}
                             onChange={(event) =>
                               void handleFileUpload("documentFrontUrl", event)
                             }
@@ -1230,7 +1448,9 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                           <span>ID back</span>
                           <input
                             type="file"
-                            accept="image/*,.pdf"
+                            accept="image/jpeg,image/png,image/webp,application/pdf"
+                            data-validation-field="documentBackUrl"
+                            aria-invalid={Boolean(fieldErrors.documentBackUrl)}
                             onChange={(event) =>
                               void handleFileUpload("documentBackUrl", event)
                             }
@@ -1253,7 +1473,9 @@ export default function SharedAuthPage({ initialMode }: SharedAuthPageProps) {
                         <span>Selfie with ID</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp"
+                          data-validation-field="selfieUrl"
+                          aria-invalid={Boolean(fieldErrors.selfieUrl)}
                           onChange={(event) =>
                             void handleFileUpload("selfieUrl", event)
                           }

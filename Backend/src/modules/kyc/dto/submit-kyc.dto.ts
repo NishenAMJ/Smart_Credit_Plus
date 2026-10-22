@@ -8,6 +8,7 @@ import {
   MaxLength,
   Matches,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class SubmitKycDto {
   @IsOptional()
@@ -23,6 +24,7 @@ export class SubmitKycDto {
 
   @IsOptional()
   @IsEmail()
+  @MaxLength(254)
   email?: string;
 
   @IsOptional()

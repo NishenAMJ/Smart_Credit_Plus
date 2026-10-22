@@ -52,6 +52,11 @@ export class InitUploadDto {
   /** MIME type the client intends to upload, e.g. 'image/jpeg' or 'application/pdf'. */
   @IsIn(DOCUMENT_MIME_TYPES)
   contentType!: string;
+  /** Size checked before issuing upload credentials. */
+  @IsInt()
+  @Min(1)
+  @Max(10 * 1024 * 1024)
+  sizeBytes!: number;
   /** Optional: Firestore ID of the related entity (e.g. a loan or legal document). */
   @IsOptional()
   @IsString()
